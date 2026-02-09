@@ -255,6 +255,28 @@ export async function registerRoutes(
     socket.send(initPacket, 0, initPacket.length, port, config.serverAddress);
   });
 
+  app.post("/api/bot/proxy-test", async (_req, res) => {
+    const config = await storage.getBotConfig();
+    if (!config?.proxyUrl || !config.proxyToken) {
+      return res.status(400).json({ ok: false, message: "Brak konfiguracji proxy (URL i token)" });
+    }
+    try {
+      const healthUrl = config.proxyUrl.replace(/^ws/, "http").replace(/\/$/, "") + "/health";
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(healthUrl, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (resp.ok) {
+        const data = await resp.json();
+        res.json({ ok: true, message: `Proxy dziala! Uptime: ${Math.round(data.uptime)}s` });
+      } else {
+        res.json({ ok: false, message: `Proxy odpowiada ale z bledem: HTTP ${resp.status}` });
+      }
+    } catch (e: any) {
+      res.json({ ok: false, message: `Nie mozna polaczyc z proxy: ${e.message}` });
+    }
+  });
+
   app.post("/api/bot/connect", async (_req, res) => {
     try {
       await teamspeakBot.connect();

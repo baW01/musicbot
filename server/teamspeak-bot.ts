@@ -43,11 +43,18 @@ class TeamspeakBot {
       log(`Connecting as TS3 client to ${host}:${serverPort} (UDP, port 9987 protocol)...`, "ts3bot");
       log(`Nickname: ${config.nickname}`, "ts3bot");
 
+      const useProxy = !!(config.proxyUrl && config.proxyToken);
+      if (useProxy) {
+        log(`Using UDP proxy: ${config.proxyUrl}`, "ts3bot");
+      }
+
       this.client = new TS3Client({
         host,
         port: serverPort,
         nickname: config.nickname,
         defaultChannel: config.defaultChannel || undefined,
+        proxyUrl: config.proxyUrl || undefined,
+        proxyToken: config.proxyToken || undefined,
       });
 
       this.client.on("connected", () => {

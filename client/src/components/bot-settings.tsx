@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Loader2, Wifi, WifiOff, Server, TestTube2, Search, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import { Save, Loader2, Wifi, WifiOff, Server, TestTube2, Search, CheckCircle2, XCircle, ArrowRight, Globe, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,8 @@ export function BotSettings() {
     password: "",
     nickname: "MusicBot",
     defaultChannel: "",
+    proxyUrl: "",
+    proxyToken: "",
   });
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
 
@@ -52,6 +54,8 @@ export function BotSettings() {
         password: savedConfig.password,
         nickname: savedConfig.nickname,
         defaultChannel: savedConfig.defaultChannel,
+        proxyUrl: savedConfig.proxyUrl || "",
+        proxyToken: savedConfig.proxyToken || "",
       });
     }
   }, [savedConfig]);
@@ -106,6 +110,23 @@ export function BotSettings() {
     },
     onError: (err: any) => {
       toast({ title: "Blad testu", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const proxyTestMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/bot/proxy-test");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: data.ok ? "Proxy dziala" : "Problem z proxy",
+        description: data.message,
+        variant: data.ok ? "default" : "destructive",
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Blad testu proxy", description: err.message, variant: "destructive" });
     },
   });
 
@@ -370,6 +391,94 @@ export function BotSettings() {
             <Save className="w-4 h-4 mr-1" />
           )}
           Zapisz konfiguracje
+        </Button>
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-muted-foreground" />
+            <h3 className="text-sm font-medium">UDP Proxy</h3>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Proxy jest wymagane do polaczenia z TS3 z chmury. Zainstaluj proxy na swoim VPS komenda ponizej.
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-[10px] text-muted-foreground font-medium">Instrukcja instalacji na VPS (Debian/Ubuntu):</p>
+          <div className="p-2 rounded-md bg-muted/50 text-[10px] font-mono break-all" data-testid="text-proxy-install-cmd">
+            <span className="select-all">
+              apt-get install -y nodejs npm && mkdir -p /opt/ts3proxy && cd /opt/ts3proxy
+            </span>
+            <br />
+            <span className="text-muted-foreground">
+              {"// Skopiuj plik proxy/ts3-udp-proxy.js jako /opt/ts3proxy/proxy.js"}
+            </span>
+            <br />
+            <span className="select-all">
+              PROXY_SECRET=mojsecret PROXY_PORT=9988 node proxy.js
+            </span>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Lub uzyj gotowego skryptu: skopiuj proxy/setup.sh na VPS i uruchom: bash setup.sh
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="proxyUrl" className="text-xs">Adres proxy (WebSocket URL)</Label>
+          <Input
+            id="proxyUrl"
+            value={config.proxyUrl}
+            onChange={(e) => setConfig((c) => ({ ...c, proxyUrl: e.target.value }))}
+            placeholder="ws://194.36.88.63:9988"
+            data-testid="input-proxy-url"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="proxyToken" className="text-xs">Token proxy (secret)</Label>
+          <div className="flex gap-2">
+            <Input
+              id="proxyToken"
+              value={config.proxyToken}
+              onChange={(e) => setConfig((c) => ({ ...c, proxyToken: e.target.value }))}
+              placeholder="Token z uruchomionego proxy"
+              data-testid="input-proxy-token"
+            />
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => proxyTestMutation.mutate()}
+              disabled={proxyTestMutation.isPending || !config.proxyUrl.trim()}
+              data-testid="button-test-proxy"
+            >
+              {proxyTestMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Shield className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Po zapisaniu konfiguracji i uruchomieniu proxy, kliknij Polacz
+          </p>
+        </div>
+
+        <Button
+          className="w-full"
+          onClick={() => {
+            saveConfigMutation.mutate();
+          }}
+          disabled={saveConfigMutation.isPending}
+          data-testid="button-save-proxy-config"
+        >
+          {saveConfigMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin mr-1" />
+          ) : (
+            <Save className="w-4 h-4 mr-1" />
+          )}
+          Zapisz konfiguracje proxy
         </Button>
       </Card>
     </div>

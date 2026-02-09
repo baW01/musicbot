@@ -11,12 +11,18 @@ A TeamSpeak music bot with a web control panel. Supports YouTube and SoundCloud 
 - **TeamSpeak**: ts3-nodejs-library for ServerQuery connection
 
 ## Key Files
-- `shared/schema.ts` - Data models (playlists, playlistSongs, botConfig) + TypeScript interfaces
+- `shared/schema.ts` - Data models (playlists, playlistSongs, botConfig with proxyUrl/proxyToken) + TypeScript interfaces
 - `server/routes.ts` - API routes + WebSocket handler
 - `server/queue-manager.ts` - In-memory queue/playback state management
 - `server/youtube-service.ts` - YouTube/SoundCloud search and playlist loading
-- `server/teamspeak-bot.ts` - TeamSpeak ServerQuery bot
+- `server/teamspeak-bot.ts` - TeamSpeak bot (uses TS3Client with proxy support)
+- `server/ts3-client.ts` - Custom TS3 client protocol (UDP direct or via WebSocket proxy)
+- `server/ts3-crypto.ts` - EAX encryption, AES-128-CTR, CMAC for TS3 protocol
+- `server/ts3-license.ts` - Ed25519 license key derivation, DH, signing
+- `server/ts-discovery.ts` - Auto-discovery via SRV/TSDNS
 - `server/storage.ts` - Database CRUD operations
+- `proxy/ts3-udp-proxy.js` - Standalone WebSocket-to-UDP proxy for VPS deployment
+- `proxy/setup.sh` - Auto-install script for proxy on Debian/Ubuntu VPS
 - `client/src/App.tsx` - Main app with sidebar navigation
 - `client/src/hooks/use-player.ts` - WebSocket-based player state hook
 - `client/src/components/` - UI components (NowPlaying, PlayerControls, QueueList, SearchPanel, PlaylistManager, BotSettings)
@@ -37,6 +43,15 @@ A TeamSpeak music bot with a web control panel. Supports YouTube and SoundCloud 
 - `GET /api/bot/status` - Get bot connection status
 - `POST /api/bot/connect` - Connect to TeamSpeak
 - `POST /api/bot/disconnect` - Disconnect from TeamSpeak
+- `POST /api/bot/discover` - Auto-discover server IP via SRV/TSDNS
+- `POST /api/bot/test` - Test UDP connectivity
+- `POST /api/bot/proxy-test` - Test proxy health
+
+## TeamSpeak Connection
+- Bot connects as regular client (port 9987 UDP) using custom TS3 protocol implementation
+- Replit blocks outgoing UDP, so a WebSocket-to-UDP proxy is needed on a VPS
+- Proxy files in `proxy/` directory - deploy `setup.sh` on Debian/Ubuntu VPS
+- Config: proxyUrl (ws://vps-ip:9988) and proxyToken stored in botConfig table
 
 ## WebSocket
 - Path: `/ws`

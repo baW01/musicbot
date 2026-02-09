@@ -1,6 +1,7 @@
 import dgram from "dgram";
 import crypto from "crypto";
 import { EventEmitter } from "events";
+import WebSocket from "ws";
 import {
   eaxEncrypt,
   eaxDecrypt,
@@ -45,6 +46,8 @@ interface TS3ClientConfig {
   defaultChannel?: string;
   serverPassword?: string;
   hwid?: string;
+  proxyUrl?: string;
+  proxyToken?: string;
 }
 
 interface ParsedCommand {
@@ -64,6 +67,8 @@ type TS3ClientEvents = {
 
 export class TS3Client extends EventEmitter {
   private socket: dgram.Socket | null = null;
+  private ws: WebSocket | null = null;
+  private useProxy = false;
   private config: TS3ClientConfig;
   private connected = false;
   private closing = false;
@@ -119,25 +124,7 @@ export class TS3Client extends EventEmitter {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.closing = false;
-      this.socket = dgram.createSocket("udp4");
-
-      this.socket.on("error", (err) => {
-        this.emit("error", err);
-        if (!this.connected) reject(err);
-      });
-
-      this.socket.on("message", (msg) => {
-        try {
-          this.handlePacket(msg);
-        } catch (e: any) {
-          console.error("[TS3] Packet error:", e.message);
-        }
-      });
-
-      this.socket.on("close", () => {
-        this.cleanup();
-        this.emit("disconnected", "socket closed");
-      });
+      this.useProxy = !!(this.config.proxyUrl && this.config.proxyToken);
 
       this.connectTimeout = setTimeout(() => {
         if (!this.connected) {
@@ -155,9 +142,78 @@ export class TS3Client extends EventEmitter {
         if (!this.connected) reject(err);
       });
 
-      this.socket.bind(0, () => {
-        this.sendInit0();
-      });
+      if (this.useProxy) {
+        this.connectViaProxy(reject);
+      } else {
+        this.connectDirect(reject);
+      }
+    });
+  }
+
+  private connectDirect(reject: (err: Error) => void): void {
+    this.socket = dgram.createSocket("udp4");
+
+    this.socket.on("error", (err) => {
+      this.emit("error", err);
+      if (!this.connected) reject(err);
+    });
+
+    this.socket.on("message", (msg) => {
+      try {
+        this.handlePacket(msg);
+      } catch (e: any) {
+        console.error("[TS3] Packet error:", e.message);
+      }
+    });
+
+    this.socket.on("close", () => {
+      this.cleanup();
+      this.emit("disconnected", "socket closed");
+    });
+
+    this.socket.bind(0, () => {
+      this.sendInit0();
+    });
+  }
+
+  private connectViaProxy(reject: (err: Error) => void): void {
+    const proxyUrl = this.config.proxyUrl!;
+    const token = this.config.proxyToken!;
+    const host = this.config.host;
+    const port = this.config.port;
+
+    const separator = proxyUrl.includes("?") ? "&" : "?";
+    const wsUrl = `${proxyUrl}${separator}token=${encodeURIComponent(token)}&host=${encodeURIComponent(host)}&port=${port}`;
+
+    console.log(`[TS3] Connecting via proxy: ${proxyUrl} -> ${host}:${port}`);
+
+    this.ws = new WebSocket(wsUrl);
+    this.ws.binaryType = "nodebuffer";
+
+    this.ws.on("open", () => {
+      console.log("[TS3] Proxy WebSocket connected");
+      this.sendInit0();
+    });
+
+    this.ws.on("message", (data: Buffer) => {
+      try {
+        this.handlePacket(Buffer.from(data));
+      } catch (e: any) {
+        console.error("[TS3] Packet error:", e.message);
+      }
+    });
+
+    this.ws.on("close", () => {
+      if (!this.closing) {
+        this.cleanup();
+        this.emit("disconnected", "proxy connection closed");
+      }
+    });
+
+    this.ws.on("error", (err) => {
+      console.error("[TS3] Proxy WS error:", err.message);
+      this.emit("error", err);
+      if (!this.connected) reject(err);
     });
   }
 
@@ -188,6 +244,10 @@ export class TS3Client extends EventEmitter {
       try { this.socket.close(); } catch {}
       this.socket = null;
     }
+    if (this.ws) {
+      try { this.ws.close(); } catch {}
+      this.ws = null;
+    }
   }
 
   isConnected(): boolean {
@@ -207,8 +267,14 @@ export class TS3Client extends EventEmitter {
   }
 
   private send(data: Buffer): void {
-    if (!this.socket || this.closing) return;
-    this.socket.send(data, 0, data.length, this.config.port, this.config.host);
+    if (this.closing) return;
+    if (this.useProxy) {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      this.ws.send(data);
+    } else {
+      if (!this.socket) return;
+      this.socket.send(data, 0, data.length, this.config.port, this.config.host);
+    }
   }
 
   private buildC2SHeader(pType: PacketType, flags: number, packetId: number): Buffer {
@@ -227,9 +293,12 @@ export class TS3Client extends EventEmitter {
 
   private sendInit0(): void {
     this.initStep = 0;
-    const version = 3;
-    const content = Buffer.alloc(17);
-    content.writeUInt32BE(version, 0);
+    const CLIENT_VERSION_OFFSET = 1356998400;
+    const CLIENT_VERSION = 1560592083;
+    const versionField = CLIENT_VERSION - CLIENT_VERSION_OFFSET;
+
+    const content = Buffer.alloc(21);
+    content.writeUInt32BE(versionField, 0);
     content[4] = 0;
     content.writeUInt32BE(this.initTimestamp, 5);
     this.initRandom0.copy(content, 9);
@@ -246,9 +315,12 @@ export class TS3Client extends EventEmitter {
 
   private sendInit2(random1: Buffer, random0_r: Buffer): void {
     this.initStep = 2;
-    const version = 3;
+    const CLIENT_VERSION_OFFSET = 1356998400;
+    const CLIENT_VERSION = 1560592083;
+    const versionField = CLIENT_VERSION - CLIENT_VERSION_OFFSET;
+
     const content = Buffer.alloc(25);
-    content.writeUInt32BE(version, 0);
+    content.writeUInt32BE(versionField, 0);
     content[4] = 2;
     random1.copy(content, 5);
     random0_r.copy(content, 21);
@@ -271,7 +343,9 @@ export class TS3Client extends EventEmitter {
     y: Buffer
   ): void {
     this.initStep = 4;
-    const version = 3;
+    const CLIENT_VERSION_OFFSET = 1356998400;
+    const CLIENT_VERSION = 1560592083;
+    const versionField = CLIENT_VERSION - CLIENT_VERSION_OFFSET;
 
     const alphaB64 = this.alpha.toString("base64");
     const omegaB64 = this.omega;
@@ -279,7 +353,7 @@ export class TS3Client extends EventEmitter {
 
     const contentBuf = Buffer.alloc(4 + 1 + 64 + 64 + 4 + 100 + 64);
     let offset = 0;
-    contentBuf.writeUInt32BE(version, offset); offset += 4;
+    contentBuf.writeUInt32BE(versionField, offset); offset += 4;
     contentBuf[offset] = 4; offset += 1;
     x.copy(contentBuf, offset); offset += 64;
     n.copy(contentBuf, offset); offset += 64;

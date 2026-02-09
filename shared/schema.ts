@@ -36,6 +36,8 @@ export const botConfig = pgTable("bot_config", {
   password: text("password").notNull().default(""),
   nickname: text("nickname").notNull().default("MusicBot"),
   defaultChannel: text("default_channel").notNull().default(""),
+  proxyUrl: text("proxy_url").notNull().default(""),
+  proxyToken: text("proxy_token").notNull().default(""),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
