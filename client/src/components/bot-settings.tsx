@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Loader2, Wifi, WifiOff, Server, RefreshCw, TestTube2 } from "lucide-react";
+import { Save, Loader2, Wifi, WifiOff, Server, TestTube2, Search, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { BotConfig, BotStatus } from "@shared/schema";
+
+interface DiscoveryResult {
+  success: boolean;
+  ip: string | null;
+  queryPort: number | null;
+  serverPort: number | null;
+  protocol: "raw" | "ssh" | null;
+  steps: string[];
+  isBehindCloudflare: boolean;
+}
 
 export function BotSettings() {
   const { toast } = useToast();
@@ -21,6 +31,7 @@ export function BotSettings() {
     nickname: "MusicBot",
     defaultChannel: "",
   });
+  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
 
   const { data: savedConfig } = useQuery<BotConfig>({
     queryKey: ["/api/bot/config"],
@@ -54,7 +65,7 @@ export function BotSettings() {
       toast({ title: "Konfiguracja zapisana" });
     },
     onError: (err: any) => {
-      toast({ title: "Błąd", description: err.message, variant: "destructive" });
+      toast({ title: "Biad", description: err.message, variant: "destructive" });
     },
   });
 
@@ -64,10 +75,10 @@ export function BotSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
-      toast({ title: "Połączono z TeamSpeak" });
+      toast({ title: "Polaczono z TeamSpeak" });
     },
     onError: (err: any) => {
-      toast({ title: "Błąd połączenia", description: err.message, variant: "destructive" });
+      toast({ title: "Blad polaczenia", description: err.message, variant: "destructive" });
     },
   });
 
@@ -77,7 +88,7 @@ export function BotSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bot/status"] });
-      toast({ title: "Rozłączono" });
+      toast({ title: "Rozlaczono" });
     },
   });
 
@@ -88,15 +99,60 @@ export function BotSettings() {
     },
     onSuccess: (data: any) => {
       toast({
-        title: data.reachable ? "Port dostępny" : "Port niedostępny",
+        title: data.reachable ? "Port dostepny" : "Port niedostepny",
         description: data.message,
         variant: data.reachable ? "default" : "destructive",
       });
     },
     onError: (err: any) => {
-      toast({ title: "Błąd testu", description: err.message, variant: "destructive" });
+      toast({ title: "Blad testu", description: err.message, variant: "destructive" });
     },
   });
+
+  const discoverMutation = useMutation({
+    mutationFn: async () => {
+      const domain = config.serverAddress.trim();
+      if (!domain) throw new Error("Wpisz adres/domene serwera");
+      const res = await apiRequest("POST", "/api/bot/discover", { domain });
+      return res.json();
+    },
+    onSuccess: (data: DiscoveryResult) => {
+      setDiscoveryResult(data);
+      if (data.success && data.ip && data.queryPort) {
+        setConfig((c) => ({
+          ...c,
+          serverAddress: data.ip!,
+          queryPort: data.queryPort!,
+          serverPort: data.serverPort || c.serverPort,
+        }));
+        toast({
+          title: "Znaleziono serwer",
+          description: `IP: ${data.ip}, Query: ${data.queryPort} (${data.protocol})`,
+        });
+      } else {
+        toast({
+          title: "Nie znaleziono serwera",
+          description: "Szczegoly ponizej. Moze byc potrzebne reczne podanie IP.",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({ title: "Blad wykrywania", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const applyDiscovery = () => {
+    if (discoveryResult?.success && discoveryResult.ip && discoveryResult.queryPort) {
+      setConfig((c) => ({
+        ...c,
+        serverAddress: discoveryResult.ip!,
+        queryPort: discoveryResult.queryPort!,
+        serverPort: discoveryResult.serverPort || c.serverPort,
+      }));
+      toast({ title: "Ustawienia zastosowane" });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -104,23 +160,23 @@ export function BotSettings() {
         <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
           <div className="flex items-center gap-2">
             <Server className="w-4 h-4 text-muted-foreground" />
-            <h3 className="text-sm font-medium">Status TeamSpeak</h3>
+            <h3 className="text-sm font-medium" data-testid="text-status-heading">Status TeamSpeak</h3>
           </div>
-          <Badge variant={botStatus?.connected ? "default" : "secondary"}>
+          <Badge variant={botStatus?.connected ? "default" : "secondary"} data-testid="badge-bot-status">
             {botStatus?.connected ? (
               <Wifi className="w-3 h-3 mr-1" />
             ) : (
               <WifiOff className="w-3 h-3 mr-1" />
             )}
-            {botStatus?.connected ? "Połączono" : "Rozłączono"}
+            {botStatus?.connected ? "Polaczono" : "Rozlaczono"}
           </Badge>
         </div>
 
         {botStatus?.connected && (
           <div className="space-y-1 mb-4 text-xs text-muted-foreground">
-            <p>Serwer: {botStatus.serverName}</p>
-            <p>Kanał: {botStatus.channel}</p>
-            <p>Klienci: {botStatus.clients}</p>
+            <p data-testid="text-server-name">Serwer: {botStatus.serverName}</p>
+            <p data-testid="text-channel">Kanal: {botStatus.channel}</p>
+            <p data-testid="text-clients">Klienci: {botStatus.clients}</p>
           </div>
         )}
 
@@ -138,7 +194,7 @@ export function BotSettings() {
               ) : (
                 <WifiOff className="w-3 h-3 mr-1" />
               )}
-              Rozłącz
+              Rozlacz
             </Button>
           ) : (
             <>
@@ -153,7 +209,7 @@ export function BotSettings() {
                 ) : (
                   <Wifi className="w-3 h-3 mr-1" />
                 )}
-                Połącz
+                Polacz
               </Button>
               <Button
                 variant="outline"
@@ -167,7 +223,7 @@ export function BotSettings() {
                 ) : (
                   <TestTube2 className="w-3 h-3 mr-1" />
                 )}
-                Test połączenia
+                Test polaczenia
               </Button>
             </>
           )}
@@ -178,19 +234,85 @@ export function BotSettings() {
         <h3 className="text-sm font-medium">Konfiguracja serwera</h3>
 
         <div className="space-y-2">
-          <Label htmlFor="serverAddress" className="text-xs">Adres serwera</Label>
-          <Input
-            id="serverAddress"
-            value={config.serverAddress}
-            onChange={(e) => setConfig((c) => ({ ...c, serverAddress: e.target.value }))}
-            placeholder="ts.example.com"
-            data-testid="input-server-address"
-          />
+          <Label htmlFor="serverAddress" className="text-xs">Adres serwera (domena lub IP)</Label>
+          <div className="flex gap-2">
+            <Input
+              id="serverAddress"
+              value={config.serverAddress}
+              onChange={(e) => setConfig((c) => ({ ...c, serverAddress: e.target.value }))}
+              placeholder="pol-speak.pl lub 123.45.67.89"
+              data-testid="input-server-address"
+            />
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => discoverMutation.mutate()}
+              disabled={discoverMutation.isPending || !config.serverAddress.trim()}
+              data-testid="button-auto-discover"
+            >
+              {discoverMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Wpisz domene i kliknij lupe - automatycznie znajde IP i port Query
+          </p>
         </div>
+
+        {discoveryResult && (
+          <Card className="p-3 space-y-2 bg-muted/30">
+            <div className="flex items-center gap-2 mb-1">
+              {discoveryResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 text-destructive shrink-0" />
+              )}
+              <span className="text-xs font-medium">
+                {discoveryResult.success ? "Serwer znaleziony" : "Nie znaleziono serwera"}
+              </span>
+            </div>
+
+            <div className="space-y-0.5 text-[11px] text-muted-foreground max-h-32 overflow-y-auto">
+              {discoveryResult.steps.map((step, i) => (
+                <div key={i} className="flex gap-1">
+                  <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>{step}</span>
+                </div>
+              ))}
+            </div>
+
+            {discoveryResult.success && discoveryResult.ip && (
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                <Badge variant="secondary" className="text-[10px]">
+                  IP: {discoveryResult.ip}
+                </Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  Query: {discoveryResult.queryPort} ({discoveryResult.protocol})
+                </Badge>
+                {discoveryResult.serverPort && discoveryResult.serverPort !== 9987 && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    Voice: {discoveryResult.serverPort}
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={applyDiscovery}
+                  data-testid="button-apply-discovery"
+                >
+                  Zastosuj
+                </Button>
+              </div>
+            )}
+          </Card>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
-            <Label htmlFor="serverPort" className="text-xs">Port serwera</Label>
+            <Label htmlFor="serverPort" className="text-xs">Port serwera (voice)</Label>
             <Input
               id="serverPort"
               type="number"
@@ -212,7 +334,7 @@ export function BotSettings() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="username" className="text-xs">Nazwa użytkownika</Label>
+          <Label htmlFor="username" className="text-xs">Nazwa uzytkownika</Label>
           <Input
             id="username"
             value={config.username}
@@ -223,13 +345,13 @@ export function BotSettings() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-xs">Hasło</Label>
+          <Label htmlFor="password" className="text-xs">Haslo</Label>
           <Input
             id="password"
             type="password"
             value={config.password}
             onChange={(e) => setConfig((c) => ({ ...c, password: e.target.value }))}
-            placeholder="Hasło ServerQuery"
+            placeholder="Haslo ServerQuery"
             data-testid="input-password"
           />
         </div>
@@ -246,12 +368,12 @@ export function BotSettings() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="defaultChannel" className="text-xs">Domyślny kanał</Label>
+          <Label htmlFor="defaultChannel" className="text-xs">Domyslny kanal</Label>
           <Input
             id="defaultChannel"
             value={config.defaultChannel}
             onChange={(e) => setConfig((c) => ({ ...c, defaultChannel: e.target.value }))}
-            placeholder="Nazwa kanału"
+            placeholder="Nazwa kanalu"
             data-testid="input-default-channel"
           />
         </div>
@@ -267,7 +389,7 @@ export function BotSettings() {
           ) : (
             <Save className="w-4 h-4 mr-1" />
           )}
-          Zapisz konfigurację
+          Zapisz konfiguracje
         </Button>
       </Card>
     </div>

@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { queueManager } from "./queue-manager";
 import { searchYouTube, searchSoundCloud, getYouTubePlaylist, getSoundCloudPlaylist, getAudioUrl } from "./youtube-service";
+import { discoverTeamspeakServer } from "./ts-discovery";
 import { teamspeakBot } from "./teamspeak-bot";
 import { insertPlaylistSchema, insertBotConfigSchema } from "@shared/schema";
 import type { PlayerState } from "@shared/schema";
@@ -188,6 +189,17 @@ export async function registerRoutes(
   // Bot status
   app.get("/api/bot/status", async (_req, res) => {
     res.json(teamspeakBot.getStatus());
+  });
+
+  app.post("/api/bot/discover", async (req, res) => {
+    const { domain } = req.body;
+    if (!domain) return res.status(400).json({ message: "Podaj domenę serwera" });
+    try {
+      const result = await discoverTeamspeakServer(domain);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
   });
 
   app.post("/api/bot/test", async (_req, res) => {

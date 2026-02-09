@@ -1,6 +1,7 @@
 import { TeamSpeak } from "ts3-nodejs-library";
 import { storage } from "./storage";
 import { queueManager } from "./queue-manager";
+import { discoverTeamspeakServer } from "./ts-discovery";
 import type { BotStatus } from "@shared/schema";
 import { log } from "./index";
 
@@ -17,14 +18,44 @@ class TeamspeakBot {
       throw new Error("Brak konfiguracji serwera TeamSpeak");
     }
 
+    let host = config.serverAddress;
+    let queryPort = config.queryPort;
+    let serverPort = config.serverPort;
+
+    const isIP = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+    if (!isIP) {
+      log(`Address "${host}" is a domain, running auto-discovery...`, "ts3bot");
+      try {
+        const discovery = await discoverTeamspeakServer(host);
+        if (discovery.success && discovery.ip && discovery.queryPort) {
+          log(`Auto-discovery found: IP=${discovery.ip}, Query=${discovery.queryPort}, Protocol=${discovery.protocol}`, "ts3bot");
+          host = discovery.ip;
+          queryPort = discovery.queryPort;
+          if (discovery.serverPort) serverPort = discovery.serverPort;
+
+          await storage.upsertBotConfig({
+            ...config,
+            serverAddress: host,
+            queryPort,
+            serverPort,
+          });
+        } else {
+          log(`Auto-discovery failed, trying original address...`, "ts3bot");
+          discovery.steps.forEach((s) => log(`  ${s}`, "ts3bot"));
+        }
+      } catch (e) {
+        log(`Auto-discovery error: ${e}, trying original address...`, "ts3bot");
+      }
+    }
+
     try {
-      const protocol = config.queryPort === 10022 ? "ssh" as const : "raw" as const;
-      log(`Connecting to ${config.serverAddress}:${config.queryPort} (${protocol}) as ${config.username}...`, "ts3bot");
+      const protocol = queryPort === 10022 ? "ssh" as const : "raw" as const;
+      log(`Connecting to ${host}:${queryPort} (${protocol}) as ${config.username}...`, "ts3bot");
 
       this.client = await TeamSpeak.connect({
-        host: config.serverAddress,
-        queryport: config.queryPort,
-        serverport: config.serverPort,
+        host,
+        queryport: queryPort,
+        serverport: serverPort,
         username: config.username,
         password: config.password,
         nickname: config.nickname,
