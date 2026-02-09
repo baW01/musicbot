@@ -65,7 +65,7 @@ export function BotSettings() {
       toast({ title: "Konfiguracja zapisana" });
     },
     onError: (err: any) => {
-      toast({ title: "Biad", description: err.message, variant: "destructive" });
+      toast({ title: "Blad", description: err.message, variant: "destructive" });
     },
   });
 
@@ -118,16 +118,15 @@ export function BotSettings() {
     },
     onSuccess: (data: DiscoveryResult) => {
       setDiscoveryResult(data);
-      if (data.success && data.ip && data.queryPort) {
+      if (data.success && data.ip) {
         setConfig((c) => ({
           ...c,
           serverAddress: data.ip!,
-          queryPort: data.queryPort!,
           serverPort: data.serverPort || c.serverPort,
         }));
         toast({
           title: "Znaleziono serwer",
-          description: `IP: ${data.ip}, Query: ${data.queryPort} (${data.protocol})`,
+          description: `IP: ${data.ip}, Voice: ${data.serverPort || 9987}`,
         });
       } else {
         toast({
@@ -143,11 +142,10 @@ export function BotSettings() {
   });
 
   const applyDiscovery = () => {
-    if (discoveryResult?.success && discoveryResult.ip && discoveryResult.queryPort) {
+    if (discoveryResult?.success && discoveryResult.ip) {
       setConfig((c) => ({
         ...c,
         serverAddress: discoveryResult.ip!,
-        queryPort: discoveryResult.queryPort!,
         serverPort: discoveryResult.serverPort || c.serverPort,
       }));
       toast({ title: "Ustawienia zastosowane" });
@@ -231,7 +229,12 @@ export function BotSettings() {
       </Card>
 
       <Card className="p-4 space-y-3">
-        <h3 className="text-sm font-medium">Konfiguracja serwera</h3>
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">Konfiguracja klienta TS3</h3>
+          <p className="text-[10px] text-muted-foreground">
+            Bot laczy sie jako zwykly klient (port 9987 UDP) - nie wymaga dostepu ServerQuery
+          </p>
+        </div>
 
         <div className="space-y-2">
           <Label htmlFor="serverAddress" className="text-xs">Adres serwera (domena lub IP)</Label>
@@ -258,7 +261,7 @@ export function BotSettings() {
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            Wpisz domene i kliknij lupe - automatycznie znajde IP i port Query
+            Wpisz domene i kliknij lupe - automatycznie znajde IP i port
           </p>
         </div>
 
@@ -289,9 +292,6 @@ export function BotSettings() {
                 <Badge variant="secondary" className="text-[10px]">
                   IP: {discoveryResult.ip}
                 </Badge>
-                <Badge variant="secondary" className="text-[10px]">
-                  Query: {discoveryResult.queryPort} ({discoveryResult.protocol})
-                </Badge>
                 {discoveryResult.serverPort && discoveryResult.serverPort !== 9987 && (
                   <Badge variant="secondary" className="text-[10px]">
                     Voice: {discoveryResult.serverPort}
@@ -310,60 +310,40 @@ export function BotSettings() {
           </Card>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-2">
-            <Label htmlFor="serverPort" className="text-xs">Port serwera (voice)</Label>
-            <Input
-              id="serverPort"
-              type="number"
-              value={config.serverPort}
-              onChange={(e) => setConfig((c) => ({ ...c, serverPort: parseInt(e.target.value) || 9987 }))}
-              data-testid="input-server-port"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="queryPort" className="text-xs">Port Query</Label>
-            <Input
-              id="queryPort"
-              type="number"
-              value={config.queryPort}
-              onChange={(e) => setConfig((c) => ({ ...c, queryPort: parseInt(e.target.value) || 10011 }))}
-              data-testid="input-query-port"
-            />
-          </div>
-        </div>
-
         <div className="space-y-2">
-          <Label htmlFor="username" className="text-xs">Nazwa uzytkownika</Label>
+          <Label htmlFor="serverPort" className="text-xs">Port serwera (UDP)</Label>
           <Input
-            id="username"
-            value={config.username}
-            onChange={(e) => setConfig((c) => ({ ...c, username: e.target.value }))}
-            placeholder="serveradmin"
-            data-testid="input-username"
+            id="serverPort"
+            type="number"
+            value={config.serverPort}
+            onChange={(e) => setConfig((c) => ({ ...c, serverPort: parseInt(e.target.value) || 9987 }))}
+            data-testid="input-server-port"
           />
+          <p className="text-[10px] text-muted-foreground">
+            Domyslnie 9987 - ten sam port co klient TeamSpeak
+          </p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-xs">Haslo</Label>
-          <Input
-            id="password"
-            type="password"
-            value={config.password}
-            onChange={(e) => setConfig((c) => ({ ...c, password: e.target.value }))}
-            placeholder="Haslo ServerQuery"
-            data-testid="input-password"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="nickname" className="text-xs">Nazwa bota</Label>
+          <Label htmlFor="nickname" className="text-xs">Nazwa bota na serwerze</Label>
           <Input
             id="nickname"
             value={config.nickname}
             onChange={(e) => setConfig((c) => ({ ...c, nickname: e.target.value }))}
             placeholder="MusicBot"
             data-testid="input-nickname"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="serverPassword" className="text-xs">Haslo serwera (opcjonalne)</Label>
+          <Input
+            id="serverPassword"
+            type="password"
+            value={config.password}
+            onChange={(e) => setConfig((c) => ({ ...c, password: e.target.value }))}
+            placeholder="Jesli serwer wymaga hasla"
+            data-testid="input-server-password"
           />
         </div>
 

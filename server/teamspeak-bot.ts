@@ -1,4 +1,4 @@
-import { TeamSpeak } from "ts3-nodejs-library";
+import { TS3Client } from "./ts3-client";
 import { storage } from "./storage";
 import { queueManager } from "./queue-manager";
 import { discoverTeamspeakServer } from "./ts-discovery";
@@ -6,7 +6,7 @@ import type { BotStatus } from "@shared/schema";
 import { log } from "./index";
 
 class TeamspeakBot {
-  private client: TeamSpeak | null = null;
+  private client: TS3Client | null = null;
   private connected = false;
   private serverName = "";
   private channelName = "";
@@ -19,7 +19,6 @@ class TeamspeakBot {
     }
 
     let host = config.serverAddress;
-    let queryPort = config.queryPort;
     let serverPort = config.serverPort;
 
     const isIP = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
@@ -27,18 +26,10 @@ class TeamspeakBot {
       log(`Address "${host}" is a domain, running auto-discovery...`, "ts3bot");
       try {
         const discovery = await discoverTeamspeakServer(host);
-        if (discovery.success && discovery.ip && discovery.queryPort) {
-          log(`Auto-discovery found: IP=${discovery.ip}, Query=${discovery.queryPort}, Protocol=${discovery.protocol}`, "ts3bot");
+        if (discovery.success && discovery.ip) {
+          log(`Auto-discovery found: IP=${discovery.ip}, Voice=${discovery.serverPort || 9987}`, "ts3bot");
           host = discovery.ip;
-          queryPort = discovery.queryPort;
           if (discovery.serverPort) serverPort = discovery.serverPort;
-
-          await storage.upsertBotConfig({
-            ...config,
-            serverAddress: host,
-            queryPort,
-            serverPort,
-          });
         } else {
           log(`Auto-discovery failed, trying original address...`, "ts3bot");
           discovery.steps.forEach((s) => log(`  ${s}`, "ts3bot"));
@@ -49,87 +40,87 @@ class TeamspeakBot {
     }
 
     try {
-      const protocol = queryPort === 10022 ? "ssh" as const : "raw" as const;
-      log(`Connecting to ${host}:${queryPort} (${protocol}) as ${config.username}...`, "ts3bot");
+      log(`Connecting as TS3 client to ${host}:${serverPort} (UDP, port 9987 protocol)...`, "ts3bot");
+      log(`Nickname: ${config.nickname}`, "ts3bot");
 
-      this.client = await TeamSpeak.connect({
+      this.client = new TS3Client({
         host,
-        queryport: queryPort,
-        serverport: serverPort,
-        username: config.username,
-        password: config.password,
+        port: serverPort,
         nickname: config.nickname,
-        protocol,
-        readyTimeout: 15000,
+        defaultChannel: config.defaultChannel || undefined,
       });
 
-      this.connected = true;
-      log("Connected to TeamSpeak server", "ts3bot");
+      this.client.on("connected", () => {
+        this.connected = true;
+        this.serverName = this.client?.getServerName() || "TeamSpeak Server";
+        log(`Connected to TeamSpeak server: ${this.serverName}`, "ts3bot");
+      });
 
-      const serverInfo = await this.client.serverInfo();
-      this.serverName = serverInfo.virtualserverName || "Unknown";
+      this.client.on("disconnected", (reason) => {
+        this.connected = false;
+        this.client = null;
+        log(`Disconnected from TeamSpeak: ${reason}`, "ts3bot");
+      });
 
-      const clients = await this.client.clientList();
-      this.clientCount = clients.length;
+      this.client.on("error", (err) => {
+        log(`TS3 error: ${err.message}`, "ts3bot");
+      });
 
-      if (config.defaultChannel) {
-        try {
-          const channels = await this.client.channelList();
-          const channel = channels.find(
-            (ch) => ch.name.toLowerCase() === config.defaultChannel.toLowerCase()
-          );
-          if (channel) {
-            const whoami = await this.client.whoami();
-            await this.client.clientMove(whoami.clientId, channel.cid);
-            this.channelName = channel.name;
-            log(`Moved to channel: ${channel.name}`, "ts3bot");
-          }
-        } catch (e) {
-          log(`Could not move to channel: ${e}`, "ts3bot");
-        }
-      }
-
-      this.client.on("textmessage", async (event) => {
-        const msg = event.msg.trim();
-        if (msg.startsWith("!")) {
-          await this.handleCommand(msg, event);
+      this.client.on("textmessage", (targetmode, msg, invokerName, invokerId) => {
+        const trimmed = msg.trim();
+        if (trimmed.startsWith("!")) {
+          this.handleCommand(trimmed, invokerName);
         }
       });
 
       queueManager.onStateChange((state) => {
         if (this.connected && this.client && state.currentSong) {
-          this.updateDescription(`Now Playing: ${state.currentSong.title}`);
+          this.client.updateDescription(`Now Playing: ${state.currentSong.title}`).catch(() => {});
         }
       });
 
-      this.client.on("close", () => {
-        this.connected = false;
-        this.client = null;
-        log("Disconnected from TeamSpeak", "ts3bot");
-      });
+      await this.client.connect();
+
+      this.connected = true;
+      this.serverName = this.client.getServerName();
+
+      if (config.defaultChannel) {
+        setTimeout(() => {
+          if (this.client?.isConnected()) {
+            const moved = this.client.moveToChannel(config.defaultChannel);
+            if (moved) {
+              this.channelName = config.defaultChannel;
+              log(`Moved to channel: ${config.defaultChannel}`, "ts3bot");
+            } else {
+              log(`Channel "${config.defaultChannel}" not found`, "ts3bot");
+            }
+          }
+        }, 2000);
+      }
     } catch (error: any) {
       this.connected = false;
       this.client = null;
       const msg = error.message || String(error);
       log(`Connection failed: ${msg}`, "ts3bot");
-      if (msg.includes("Timeout") || msg.includes("timeout")) {
+      if (msg.includes("timeout") || msg.includes("Timeout")) {
         throw new Error(
-          `Nie udało się połączyć - timeout. Sprawdź:\n` +
-          `1. Czy adres "${config.serverAddress}" to bezpośredni IP serwera (nie domena za Cloudflare)\n` +
-          `2. Czy port Query (${config.queryPort}) jest poprawny\n` +
-          `3. Czy serwer TS3 jest online i dostępny z internetu`
+          `Nie udalo sie polaczyc - timeout. Sprawdz:\n` +
+          `1. Czy adres "${host}" jest poprawny\n` +
+          `2. Czy port ${serverPort} (UDP) jest dostepny\n` +
+          `3. Czy serwer TS3 jest online\n` +
+          `4. Czy firewall serwera nie blokuje IP bota`
         );
       }
       if (msg.includes("banned") || msg.includes("blacklist")) {
-        throw new Error(`IP bota zostało zablokowane przez serwer. Skontaktuj się z adminem serwera.`);
+        throw new Error(`IP bota zostalo zablokowane przez serwer. Skontaktuj sie z adminem serwera.`);
       }
-      throw new Error(`Nie udało się połączyć: ${msg}`);
+      throw new Error(`Nie udalo sie polaczyc: ${msg}`);
     }
   }
 
   async disconnect(): Promise<void> {
     if (this.client) {
-      await this.client.quit();
+      this.client.disconnect();
       this.client = null;
       this.connected = false;
       log("Disconnected from TeamSpeak", "ts3bot");
@@ -140,25 +131,12 @@ class TeamspeakBot {
     return {
       connected: this.connected,
       serverName: this.serverName,
-      channel: this.channelName,
-      clients: this.clientCount,
+      channel: this.client?.getChannelName() || this.channelName,
+      clients: this.client?.getClientCount() || 0,
     };
   }
 
-  private async updateDescription(text: string) {
-    try {
-      if (this.client) {
-        const whoami = await this.client.whoami();
-        await this.client.clientEdit(whoami.clientId, {
-          clientDescription: text,
-        });
-      }
-    } catch {
-      // silently fail description update
-    }
-  }
-
-  private async handleCommand(msg: string, event: any) {
+  private async handleCommand(msg: string, invokerName: string) {
     const parts = msg.split(" ");
     const cmd = parts[0].toLowerCase();
 
@@ -166,40 +144,40 @@ class TeamspeakBot {
       switch (cmd) {
         case "!play":
           queueManager.play();
-          await this.sendMessage("Odtwarzanie wznowione");
+          this.sendMessage("Odtwarzanie wznowione");
           break;
         case "!pause":
           queueManager.pause();
-          await this.sendMessage("Zatrzymano");
+          this.sendMessage("Zatrzymano");
           break;
         case "!skip":
           queueManager.skip();
-          await this.sendMessage("Pominięto utwór");
+          this.sendMessage("Pominieto utwor");
           break;
         case "!stop":
           queueManager.stop();
-          await this.sendMessage("Odtwarzanie zatrzymane");
+          this.sendMessage("Odtwarzanie zatrzymane");
           break;
         case "!np":
         case "!nowplaying": {
           const state = queueManager.getState();
           if (state.currentSong) {
-            await this.sendMessage(`Teraz gra: ${state.currentSong.title}`);
+            this.sendMessage(`Teraz gra: ${state.currentSong.title}`);
           } else {
-            await this.sendMessage("Nic nie jest odtwarzane");
+            this.sendMessage("Nic nie jest odtwarzane");
           }
           break;
         }
         case "!queue": {
           const state = queueManager.getState();
           if (state.queue.length === 0) {
-            await this.sendMessage("Kolejka jest pusta");
+            this.sendMessage("Kolejka jest pusta");
           } else {
             const list = state.queue
               .slice(0, 5)
               .map((s, i) => `${i + 1}. ${s.title}`)
               .join("\n");
-            await this.sendMessage(`Kolejka (${state.queue.length}):\n${list}`);
+            this.sendMessage(`Kolejka (${state.queue.length}):\n${list}`);
           }
           break;
         }
@@ -207,12 +185,12 @@ class TeamspeakBot {
           const vol = parseInt(parts[1]);
           if (!isNaN(vol)) {
             queueManager.setVolume(vol);
-            await this.sendMessage(`Głośność: ${vol}%`);
+            this.sendMessage(`Glosnosc: ${vol}%`);
           }
           break;
         }
         case "!help":
-          await this.sendMessage(
+          this.sendMessage(
             "Komendy: !play, !pause, !skip, !stop, !np, !queue, !volume [0-100], !help"
           );
           break;
@@ -222,13 +200,12 @@ class TeamspeakBot {
     }
   }
 
-  private async sendMessage(text: string) {
+  private sendMessage(text: string) {
     try {
-      if (this.client) {
-        await this.client.sendTextMessage("0", 2, text);
+      if (this.client?.isConnected()) {
+        this.client.sendChannelMessage(text);
       }
     } catch {
-      // silently fail
     }
   }
 }

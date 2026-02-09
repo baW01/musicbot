@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import crypto from "crypto";
 import { storage } from "./storage";
 import { queueManager } from "./queue-manager";
 import { searchYouTube, searchSoundCloud, getYouTubePlaylist, getSoundCloudPlaylist, getAudioUrl } from "./youtube-service";
@@ -207,26 +208,51 @@ export async function registerRoutes(
     if (!config?.serverAddress) {
       return res.status(400).json({ message: "Brak adresu serwera" });
     }
-    const net = await import("net");
-    const socket = new net.default.Socket();
-    socket.setTimeout(5000);
-    const port = config.queryPort || 10011;
-    socket.on("connect", () => {
-      socket.destroy();
-      res.json({ reachable: true, message: `Port ${port} na ${config.serverAddress} jest dostępny` });
+    const dgram = await import("dgram");
+    const port = config.serverPort || 9987;
+    const socket = dgram.createSocket("udp4");
+    let responded = false;
+
+    const timeout = setTimeout(() => {
+      if (!responded) {
+        responded = true;
+        socket.close();
+        res.json({
+          reachable: false,
+          message: `Serwer ${config.serverAddress}:${port} (UDP) nie odpowiada. Sprawdz czy adres jest poprawny i firewall nie blokuje polaczenia.`,
+        });
+      }
+    }, 5000);
+
+    socket.on("message", () => {
+      if (!responded) {
+        responded = true;
+        clearTimeout(timeout);
+        socket.close();
+        res.json({ reachable: true, message: `Serwer TS3 na ${config.serverAddress}:${port} odpowiada!` });
+      }
     });
-    socket.on("timeout", () => {
-      socket.destroy();
-      res.json({
-        reachable: false,
-        message: `Port ${port} na ${config.serverAddress} nie odpowiada (timeout). Jeśli domena jest za Cloudflare, użyj bezpośredniego IP serwera.`,
-      });
-    });
+
     socket.on("error", (err: any) => {
-      socket.destroy();
-      res.json({ reachable: false, message: `Nie można połączyć z ${config.serverAddress}:${port} - ${err.message}` });
+      if (!responded) {
+        responded = true;
+        clearTimeout(timeout);
+        socket.close();
+        res.json({ reachable: false, message: `Blad UDP: ${err.message}` });
+      }
     });
-    socket.connect(port, config.serverAddress);
+
+    const initPacket = Buffer.alloc(34);
+    Buffer.from("TS3INIT1").copy(initPacket, 0);
+    initPacket.writeUInt16BE(0x65, 8);
+    initPacket.writeUInt16BE(0, 10);
+    initPacket[12] = 0x88;
+    initPacket.writeUInt32BE(3, 13);
+    initPacket[17] = 0;
+    initPacket.writeUInt32BE(Math.floor(Date.now() / 1000), 18);
+    crypto.randomBytes(4).copy(initPacket, 22);
+
+    socket.send(initPacket, 0, initPacket.length, port, config.serverAddress);
   });
 
   app.post("/api/bot/connect", async (_req, res) => {
