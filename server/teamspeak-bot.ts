@@ -18,6 +18,9 @@ class TeamspeakBot {
     }
 
     try {
+      const protocol = config.queryPort === 10022 ? "ssh" as const : "raw" as const;
+      log(`Connecting to ${config.serverAddress}:${config.queryPort} (${protocol}) as ${config.username}...`, "ts3bot");
+
       this.client = await TeamSpeak.connect({
         host: config.serverAddress,
         queryport: config.queryPort,
@@ -25,6 +28,8 @@ class TeamspeakBot {
         username: config.username,
         password: config.password,
         nickname: config.nickname,
+        protocol,
+        readyTimeout: 15000,
       });
 
       this.connected = true;
@@ -74,7 +79,20 @@ class TeamspeakBot {
     } catch (error: any) {
       this.connected = false;
       this.client = null;
-      throw new Error(`Nie udało się połączyć: ${error.message}`);
+      const msg = error.message || String(error);
+      log(`Connection failed: ${msg}`, "ts3bot");
+      if (msg.includes("Timeout") || msg.includes("timeout")) {
+        throw new Error(
+          `Nie udało się połączyć - timeout. Sprawdź:\n` +
+          `1. Czy adres "${config.serverAddress}" to bezpośredni IP serwera (nie domena za Cloudflare)\n` +
+          `2. Czy port Query (${config.queryPort}) jest poprawny\n` +
+          `3. Czy serwer TS3 jest online i dostępny z internetu`
+        );
+      }
+      if (msg.includes("banned") || msg.includes("blacklist")) {
+        throw new Error(`IP bota zostało zablokowane przez serwer. Skontaktuj się z adminem serwera.`);
+      }
+      throw new Error(`Nie udało się połączyć: ${msg}`);
     }
   }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Loader2, Wifi, WifiOff, Server, RefreshCw } from "lucide-react";
+import { Save, Loader2, Wifi, WifiOff, Server, RefreshCw, TestTube2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,6 +81,23 @@ export function BotSettings() {
     },
   });
 
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/bot/test");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: data.reachable ? "Port dostępny" : "Port niedostępny",
+        description: data.message,
+        variant: data.reachable ? "default" : "destructive",
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Błąd testu", description: err.message, variant: "destructive" });
+    },
+  });
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -124,19 +141,35 @@ export function BotSettings() {
               Rozłącz
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={() => connectMutation.mutate()}
-              disabled={connectMutation.isPending}
-              data-testid="button-connect"
-            >
-              {connectMutation.isPending ? (
-                <Loader2 className="w-3 h-3 animate-spin mr-1" />
-              ) : (
-                <Wifi className="w-3 h-3 mr-1" />
-              )}
-              Połącz
-            </Button>
+            <>
+              <Button
+                size="sm"
+                onClick={() => connectMutation.mutate()}
+                disabled={connectMutation.isPending}
+                data-testid="button-connect"
+              >
+                {connectMutation.isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                ) : (
+                  <Wifi className="w-3 h-3 mr-1" />
+                )}
+                Połącz
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => testMutation.mutate()}
+                disabled={testMutation.isPending}
+                data-testid="button-test-connection"
+              >
+                {testMutation.isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                ) : (
+                  <TestTube2 className="w-3 h-3 mr-1" />
+                )}
+                Test połączenia
+              </Button>
+            </>
           )}
         </div>
       </Card>

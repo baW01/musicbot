@@ -190,6 +190,33 @@ export async function registerRoutes(
     res.json(teamspeakBot.getStatus());
   });
 
+  app.post("/api/bot/test", async (_req, res) => {
+    const config = await storage.getBotConfig();
+    if (!config?.serverAddress) {
+      return res.status(400).json({ message: "Brak adresu serwera" });
+    }
+    const net = await import("net");
+    const socket = new net.default.Socket();
+    socket.setTimeout(5000);
+    const port = config.queryPort || 10011;
+    socket.on("connect", () => {
+      socket.destroy();
+      res.json({ reachable: true, message: `Port ${port} na ${config.serverAddress} jest dostępny` });
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      res.json({
+        reachable: false,
+        message: `Port ${port} na ${config.serverAddress} nie odpowiada (timeout). Jeśli domena jest za Cloudflare, użyj bezpośredniego IP serwera.`,
+      });
+    });
+    socket.on("error", (err: any) => {
+      socket.destroy();
+      res.json({ reachable: false, message: `Nie można połączyć z ${config.serverAddress}:${port} - ${err.message}` });
+    });
+    socket.connect(port, config.serverAddress);
+  });
+
   app.post("/api/bot/connect", async (_req, res) => {
     try {
       await teamspeakBot.connect();
