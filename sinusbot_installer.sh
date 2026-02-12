@@ -592,17 +592,6 @@ fi
 
 greenMessage "Packages installed!"
 
-# Setting server time
-# ... (keeping time setting logic but updating slightly for modern systems)
-if [[ $VIRTUALIZATION_TYPE == "openvz" ]]; then
-  redMessage "You're using OpenVZ virtualization. Skipping time sync..."
-else
-  if command -v timedatectl &>/dev/null; then
-    timedatectl set-ntp yes || true
-    greenMessage "NTP sync enabled via timedatectl."
-  fi
-fi
-
 USERADD=$(which useradd)
 GROUPADD=$(which groupadd)
 ipaddress=$(ip route get 8.8.8.8 | awk {'print $7'} | tr -d '\n')
