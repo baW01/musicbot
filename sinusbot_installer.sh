@@ -109,23 +109,27 @@ install_python310() {
 
   yellowMessage "Python 3.10+ not found. Installing..."
   case "$OS" in
-    ubuntu)
+    ubuntu|debian)
       apt-get update -qq
-      apt-get install -y software-properties-common
-      add-apt-repository -y ppa:deadsnakes/ppa
-      apt-get update -qq
-      apt-get install -y python3.10 python3.10-distutils
-      PYTHON_BIN=$(command -v python3.10)
-      ;;
-    debian)
-      apt-get update -qq
-      apt-get install -y wget build-essential libreadline-gplv2-dev libncursesw5-dev libssl-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev zlib1g-dev
-      if [[ "$OS_VER" == "11" ]]; then
-        apt-get install -y python3.10 || errorExit "Could not install Python 3.10. Please upgrade to Debian 12."
-      else
-        apt-get install -y python3.10 || apt-get install -y python3
+      if [[ "$OS" == "ubuntu" ]]; then
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:deadsnakes/ppa
+        apt-get update -qq
       fi
-      PYTHON_BIN=$(command -v python3.10 || command -v python3)
+      apt-get install -y python3.10 python3.10-distutils python3.10-venv
+      
+      # Set Python 3.10 as default python3 using update-alternatives
+      local py3_path
+      py3_path=$(command -v python3)
+      local py310_path
+      py310_path=$(command -v python3.10)
+      
+      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1 2>/dev/null || true
+      update-alternatives --install /usr/bin/python3 python3 "$py310_path" 10
+      update-alternatives --set python3 "$py310_path"
+      
+      PYTHON_BIN="/usr/bin/python3"
+      greenMessage "Python 3.10 is now the default python3."
       ;;
     centos|rhel|almalinux|rocky)
       if command -v dnf &>/dev/null; then
@@ -956,7 +960,7 @@ fi
 # If startup failed, the script will start normal sinusbot without screen for looking about errors. If startup successed => installation done.
 IS_RUNNING=false
 if [[ "$USE_SYSTEMD" == true ]]; then
-  if [[ $(systemctl is-active sinusbot >/dev/null && echo UP || echo DOWN) == "UP" ]]; then
+  if systemctl is-active --quiet sinusbot; then
     IS_RUNNING=true
   fi
 elif [[ "$USE_SYSTEMD" == false ]]; then
