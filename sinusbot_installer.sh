@@ -10,6 +10,7 @@ trap 'err_report $LINENO' ERR
 MACHINE=$(uname -m)
 Instversion="1.6"
 USE_SYSTEMD=true
+PYTHON_BIN="python3"
 
 # Functions
 
@@ -87,22 +88,22 @@ detect_os() {
 # Python 3.10+ Installation
 install_python310() {
   greenMessage "Checking for Python 3.10+..."
-  local py_bin=""
+  PYTHON_BIN=""
   
   if command -v python3.11 &>/dev/null; then 
-    py_bin="python3.11"
+    PYTHON_BIN=$(command -v python3.11)
   elif command -v python3.10 &>/dev/null; then 
-    py_bin="python3.10"
+    PYTHON_BIN=$(command -v python3.10)
   elif command -v python3 &>/dev/null; then
     local ver
     ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
     if [[ $(echo "$ver >= 3.10" | bc -l) == "1" ]]; then 
-      py_bin="python3"
+      PYTHON_BIN=$(command -v python3)
     fi
   fi
 
-  if [ -n "$py_bin" ]; then
-    greenMessage "Python $($py_bin --version) already installed."
+  if [ -n "$PYTHON_BIN" ]; then
+    greenMessage "Python $($PYTHON_BIN --version) found at $PYTHON_BIN."
     return 0
   fi
 
@@ -114,19 +115,17 @@ install_python310() {
       add-apt-repository -y ppa:deadsnakes/ppa
       apt-get update -qq
       apt-get install -y python3.10 python3.10-distutils
+      PYTHON_BIN=$(command -v python3.10)
       ;;
     debian)
       apt-get update -qq
       apt-get install -y wget build-essential libreadline-gplv2-dev libncursesw5-dev libssl-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev zlib1g-dev
-      # For Debian, it's safer to use the version from backports or just rely on newer Debian releases
       if [[ "$OS_VER" == "11" ]]; then
-        # Debian 11 has 3.9, we might need to compile or use a repo
-        yellowMessage "Debian 11 detected. Installing Python 3.10 from source might take a while..."
-        # Better approach: advise upgrade or use a trusted repo if available
-        apt-get install -y python3.10 || errorExit "Could not install Python 3.10 on Debian 11 easily. Please upgrade to Debian 12."
+        apt-get install -y python3.10 || errorExit "Could not install Python 3.10. Please upgrade to Debian 12."
       else
         apt-get install -y python3.10 || apt-get install -y python3
       fi
+      PYTHON_BIN=$(command -v python3.10 || command -v python3)
       ;;
     centos|rhel|almalinux|rocky)
       if command -v dnf &>/dev/null; then
@@ -134,8 +133,13 @@ install_python310() {
       else
         yum install -y python3.10 || yum install -y python3
       fi
+      PYTHON_BIN=$(command -v python3.10 || command -v python3)
       ;;
   esac
+  
+  if [ -z "$PYTHON_BIN" ]; then
+    errorExit "Failed to install/detect Python 3.10+."
+  fi
 }
 
 # Check if the script was run as root user. Otherwise exit the script
@@ -756,6 +760,9 @@ if [[ "$USE_SYSTEMD" == true ]]; then
   sed -i 's/User=YOUR_USER/User='$SINUSBOTUSER'/g' /lib/systemd/system/sinusbot.service
   sed -i 's!ExecStart=YOURPATH_TO_THE_BOT_BINARY!ExecStart='$LOCATIONex'!g' /lib/systemd/system/sinusbot.service
   sed -i 's!WorkingDirectory=YOURPATH_TO_THE_BOT_DIRECTORY!WorkingDirectory='$LOCATION'!g' /lib/systemd/system/sinusbot.service
+  
+  # Add automatic permission fix to service file
+  sed -i "/\[Service\]/a ExecStartPre=/bin/chown -R $SINUSBOTUSER:$SINUSBOTUSER $LOCATION" /lib/systemd/system/sinusbot.service
 
   systemctl daemon-reload
   systemctl enable sinusbot.service
@@ -834,10 +841,10 @@ if [ "$YT" == "Yes" ]; then
   fi
 
   greenMessage "Installing Cronjob for automatic YT-DLP update..."
-  echo "0 0 * * * root PATH=$PATH:/usr/local/bin; $YTDL_BIN -U --restrict-filename >/dev/null" >>/etc/cron.d/ytdl
+  echo "0 0 * * * root PATH=$PATH:/usr/local/bin; $PYTHON_BIN $YTDL_BIN -U --restrict-filename >/dev/null" >>/etc/cron.d/ytdl
   greenMessage "Installing Cronjob successful."
 
-  sed -i "s|YoutubeDLPath = .*|YoutubeDLPath = \"$YTDL_BIN\"|g" "$LOCATION/config.ini"
+  sed -i "s|YoutubeDLPath = .*|YoutubeDLPath = \"$PYTHON_BIN $YTDL_BIN\"|g" "$LOCATION/config.ini"
 
   if [[ -f "$YTDL_BIN" ]]; then
     rm "$YTDL_BIN"
@@ -854,7 +861,7 @@ if [ "$YT" == "Yes" ]; then
 
   chmod a+rx "$YTDL_BIN"
   # Try to update/self-update to ensure it's working
-  "$YTDL_BIN" -U --restrict-filename || true
+  $PYTHON_BIN "$YTDL_BIN" -U --restrict-filename || true
 fi
 
 # Creating Readme
@@ -921,9 +928,9 @@ if [ "$INSTALL" != "Updt" ]; then
 fi
 
 if [[ "$USE_SYSTEMD" == true ]]; then
-  service sinusbot start
+  service sinusbot start || yellowMessage "Systemd service failed to start, will check logs later..."
 elif [[ "$USE_SYSTEMD" == false ]]; then
-  /etc/init.d/sinusbot start
+  /etc/init.d/sinusbot start || yellowMessage "Init.d script failed to start, will check logs later..."
 fi
 yellowMessage "Please wait... This will take some seconds"!
 chown -R $SINUSBOTUSER:$SINUSBOTUSER $LOCATION
