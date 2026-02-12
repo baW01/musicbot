@@ -61,17 +61,23 @@ err_report() {
 
 # OS Detection
 detect_os() {
+  OS="unknown"
+  OS_VER="unknown"
+  OS_NAME="Unknown OS"
+  
   if [ -f /etc/os-release ]; then
     . /etc/os-release
     OS=$ID
-    OS_VER=$VERSION_ID
-    OS_NAME=$PRETTY_NAME
+    OS_VER=${VERSION_ID:-"unknown"}
+    OS_NAME=${PRETTY_NAME:-"Unknown OS"}
   elif [ -f /etc/debian_version ]; then
     OS="debian"
     OS_VER=$(cat /etc/debian_version)
+    OS_NAME="Debian $OS_VER"
   elif [ -f /etc/centos-release ]; then
     OS="centos"
     OS_VER=$(cat /etc/centos-release | tr -dc '0-9.' | cut -d. -f1)
+    OS_NAME="CentOS $OS_VER"
   else
     errorExit "Unsupported OS. Please use Debian, Ubuntu, or CentOS/RHEL-based systems."
   fi
@@ -82,11 +88,17 @@ detect_os() {
 install_python310() {
   greenMessage "Checking for Python 3.10+..."
   local py_bin=""
-  if command -v python3.11 &>/dev/null; then py_bin="python3.11"
-  elif command -v python3.10 &>/dev/null; then py_bin="python3.10"
+  
+  if command -v python3.11 &>/dev/null; then 
+    py_bin="python3.11"
+  elif command -v python3.10 &>/dev/null; then 
+    py_bin="python3.10"
   elif command -v python3 &>/dev/null; then
-    local ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
-    if [[ $(echo "$ver >= 3.10" | bc -l 2>/dev/null) -eq 1 ]]; then py_bin="python3"; fi
+    local ver
+    ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
+    if [[ $(echo "$ver >= 3.10" | bc -l) == "1" ]]; then 
+      py_bin="python3"
+    fi
   fi
 
   if [ -n "$py_bin" ]; then
@@ -428,16 +440,14 @@ if [ "$INSTALL" == "Rem" ]; then
     esac
   done
 
-  if [ "$(ps ax | grep sinusbot | grep SCREEN)" ]; then
-    ps ax | grep sinusbot | grep SCREEN | awk '{print $1}' | while read PID; do
-      kill $PID
-    done
+  pids=$(ps ax | grep sinusbot | grep SCREEN | awk '{print $1}') || true
+  if [ -n "$pids" ]; then
+    echo "$pids" | while read -r PID; do kill "$PID" 2>/dev/null || true; done
   fi
 
-  if [ "$(ps ax | grep ts3bot | grep SCREEN)" ]; then
-    ps ax | grep ts3bot | grep SCREEN | awk '{print $1}' | while read PID; do
-      kill $PID
-    done
+  pids=$(ps ax | grep ts3bot | grep SCREEN | awk '{print $1}') || true
+  if [ -n "$pids" ]; then
+    echo "$pids" | while read -r PID; do kill "$PID" 2>/dev/null || true; done
   fi
 
   if [[ -f /lib/systemd/system/sinusbot.service ]]; then
@@ -641,12 +651,15 @@ chown -R $SINUSBOTUSER:$SINUSBOTUSER $LOCATION
 fi
 
 # Create dirs or remove them.
+if [ -n "$SINUSBOTUSER" ]; then
+  pids=$(ps -u "$SINUSBOTUSER" | grep ts3client | awk '{print $1}') || true
+  if [ -n "$pids" ]; then
+    echo "$pids" | while read PID; do kill "$PID" 2>/dev/null || true; done
+  fi
+fi
 
-ps -u $SINUSBOTUSER | grep ts3client | awk '{print $1}' | while read PID; do
-  kill $PID
-done
-if [[ -f $LOCATION/ts3client_startscript.run ]]; then
-  rm -rf $LOCATION/*
+if [[ -n "$LOCATION" && "$LOCATION" != "/" && -f "$LOCATION/ts3client_startscript.run" ]]; then
+  rm -rf "${LOCATION:?}"/*
 fi
 
 if [ "$DISCORD" == "false" ]; then
